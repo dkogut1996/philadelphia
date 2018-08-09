@@ -23,7 +23,7 @@ class TestInitiator {
             int    port   = Integer.parseInt(args[1]);
             int    orders = Integer.parseInt(args[2]);
 
-            main(new InetSocketAddress(host, port), orders, host, port);
+            main(new InetSocketAddress(host, port), orders);
         } catch (IllegalArgumentException e) {
             usage(USAGE);
         } catch (IOException e) {
@@ -31,119 +31,53 @@ class TestInitiator {
         }
     }
 
-    private static void main(InetSocketAddress address, int orders, String host, int port) throws IOException {
+    private static void main(InetSocketAddress address, int orders) throws IOException {
+        Initiator initiator = Initiator.open(address);
+
+        long nextClOrdId = 1;
+
+        FIXMessage message = initiator.getTransport().create();
+
+        initiator.getTransport().prepare(message, OrderSingle);
+
+        FIXValue clOrdId = message.addField(ClOrdID);
+
+        message.addField(HandlInst).setChar(HandlInstValues.AutomatedExecutionNoIntervention);
+        message.addField(Symbol).setString("FOO");
+        message.addField(Side).setChar(SideValues.Buy);
+
+        FIXValue transactTime = message.addField(TransactTime);
+        transactTime.setString(initiator.getTransport().getCurrentTimestamp());
+
+        message.addField(OrderQty).setFloat(100.00, 2);
+        message.addField(OrdType).setChar(OrdTypeValues.Limit);
+        message.addField(Price).setFloat(25.50, 2);
+
         System.out.println("Warming up...");
 
-        Thread t[] = new Thread[36];
-        Initiator inits[] = new Initiator[37];
-        Thread rem = new Thread();
-        for (int j = 0; j <= 36; j++) {
-          InetSocketAddress addr = new InetSocketAddress(host, port);
-          inits[j] = Initiator.open(addr);
-        }
-        for (int j = 0; j <= 36; j++) {
-          long nextClOrdId = 1+j*(orders/36);
+        for (int i = 0; i < orders; i++) {
+            clOrdId.setInt(nextClOrdId++);
 
-          FIXMessage message = inits[j].getTransport().create();
+            initiator.send(message);
 
-          inits[j].getTransport().prepare(message, OrderSingle);
-
-          FIXValue clOrdId = message.addField(ClOrdID);
-
-          message.addField(HandlInst).setChar(HandlInstValues.AutomatedExecutionNoIntervention);
-          message.addField(Symbol).setString("FOO");
-          message.addField(Side).setChar(SideValues.Buy);
-
-          FIXValue transactTime = message.addField(TransactTime);
-          transactTime.setString(inits[j].getTransport().getCurrentTimestamp());
-
-          message.addField(OrderQty).setFloat(100.00, 2);
-          message.addField(OrdType).setChar(OrdTypeValues.Limit);
-          message.addField(Price).setFloat(25.50, 2);
-          if (j < 36) {
-            t[j] = new ParallelRequest(orders/36, inits[j], message);
-          } else {
-            if (orders%36 == 0) {
-              rem = new ParallelRequest(orders%36, inits[j], message);
-            }
-          }
-        }
-        for (int j = 0; j < 36; j++) {
-          t[j].start();
-        }
-        if (orders%36 == 0) {
-          rem.start();
-        }
-        for (int i = 0; i < 36; i++) {
-          try {
-            t[i].join();
-          } catch (InterruptedException e) {
-            e.printStackTrace();
-          }
-        }
-        try {
-          rem.join();
-        } catch (InterruptedException e) {
-          e.printStackTrace();
+            initiator.receive();
         }
 
-        for (int j = 0; j <= 36; j++) {
-          inits[j].getHistogram().reset();
-        }
+        initiator.getHistogram().reset();
 
         System.out.println("Benchmarking...");
 
         long start = System.nanoTime();
-        for (int j = 0; j <= 36; j++) {
-          long nextClOrdId = 1+j*(orders/36);
+        for (int i = 0; i < orders; i++) {
+            clOrdId.setInt(nextClOrdId++);
 
-          FIXMessage message = inits[j].getTransport().create();
+            initiator.send(message);
 
-          inits[j].getTransport().prepare(message, OrderSingle);
-
-          FIXValue clOrdId = message.addField(ClOrdID);
-
-          message.addField(HandlInst).setChar(HandlInstValues.AutomatedExecutionNoIntervention);
-          message.addField(Symbol).setString("FOO");
-          message.addField(Side).setChar(SideValues.Buy);
-
-          FIXValue transactTime = message.addField(TransactTime);
-          transactTime.setString(inits[j].getTransport().getCurrentTimestamp());
-
-          message.addField(OrderQty).setFloat(100.00, 2);
-          message.addField(OrdType).setChar(OrdTypeValues.Limit);
-          message.addField(Price).setFloat(25.50, 2);
-          if (j < 36) {
-            t[j] = new ParallelRequest(orders/36, inits[j], message);
-          } else {
-            if (orders%36 == 0) {
-              rem = new ParallelRequest(orders%36, inits[j], message);
-            }
-          }
-        }
-        for (int j = 0; j < 36; j++) {
-          t[j].start();
-        }
-        if (orders%36 == 0) {
-          rem.start();
-        }
-        for (int i = 0; i < 36; i++) {
-          try {
-            t[i].join();
-          } catch (InterruptedException e) {
-            e.printStackTrace();
-          }
-        }
-        try {
-          rem.join();
-        } catch (InterruptedException e) {
-          e.printStackTrace();
+            initiator.receive();
         }
         long end = System.nanoTime();
 
-        for (int j = 0; j <= 36; j++) {
-          inits[j].getTransport().close();
-        }
+        initiator.getTransport().close();
 
         System.out.printf("Results (n = %d)\n", orders);
         System.out.printf("\n");
